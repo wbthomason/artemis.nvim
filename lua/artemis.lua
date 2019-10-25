@@ -2,8 +2,10 @@ local default_sources  = require('default_sources')
 local default_filters  = require('default_filters')
 local default_matchers = require('default_matchers')
 local window_fns       = require('window_fns')
-local format_fns       = require('format_fns')
-local util             = require('util')
+local display_fns       = require('display_fns')
+
+local util = require('util')
+local types = require('types')
 
 -- Set up structure
 local artemis = {}
@@ -23,18 +25,22 @@ artemis.config = {
   global_matchers = {},
   global_filters  = {},
   window_fn       = window_fns.floating_window,
-  format_fns      = { default = format_fns.default_format_fn },
-  spinner         = {'-', '\\', '|', '/'}
+  display_fns      = { default = display_fns.default_display_fn },
+  spinner         = {'―', '╲', '❘', '╱'}
 }
+
+-- Re-export some types for convenience
+local Source = types.Source
+local Graph = types.Graph
 
 -- Define a search context
 local Context = {}
-function Context:new(buf, win, sources, start_dir, query, data)
+function Context:new(buf, win, pipeline, start_dir, query, data)
   -- Set basic metadata fields
   local ctx = {
     buf = buf,
     win = win,
-    sources = sources,
+    pipeline = pipeline,
     search_dir = start_dir,
     query = query,
     data = data,
@@ -61,7 +67,7 @@ function Context:start()
   end
 
   -- Start each source function as new async work
-  for _, name in ipairs(self.sources) do
+  for _, name in ipairs(self.pipeline) do
     self.results[name] = { running = true, data = {} }
     vim.loop.queue_work(self.source_ctx, name)
   end
@@ -96,10 +102,10 @@ function Context:stop()
 end
 
 -- Start a new search
-artemis.find = function(sources, start_dir, query)
+artemis.find = function(pipeline, start_dir, query)
   start_dir = start_dir or vim.api.nvim_eval('expand(%:p)')
   local buf, win = artemis.config.window_fn()
-  local ctx = Context:new(buf, win, sources, start_dir, query)
+  local ctx = Context:new(buf, win, pipeline, start_dir, query)
   -- Set metadata
   artemis.__metadata.last.ctx = ctx
   -- TODO Start the spinner
@@ -124,7 +130,7 @@ end
 artemis.update_display = function(buf, win, results)
   local lines = {}
   for source, source_results in pairs(results) do
-    local format_fn = artemis.config.format_fns[source] or artemis.config.format_fns.default
+    local format_fn = artemis.config.display_fns[source] or artemis.config.display_fns.default
     local source_lines = format_fn(source_results)
     lines[source] = table.concat(source_lines, '\n')
   end
