@@ -2,7 +2,7 @@ local default_sources  = require('default_sources')
 local default_filters  = require('default_filters')
 local default_matchers = require('default_matchers')
 local window_fns       = require('window_fns')
-local display_fns       = require('display_fns')
+local display_fns      = require('display_fns')
 
 local util = require('util')
 local types = require('types')
@@ -25,17 +25,18 @@ artemis.config = {
   global_matchers = {},
   global_filters  = {},
   window_fn       = window_fns.floating_window,
-  display_fns      = { default = display_fns.default_display_fn },
+  display_fns     = { default = display_fns.default_display_fn },
   spinner         = {'―', '╲', '❘', '╱'}
 }
 
 -- Re-export some types for convenience
 local Source = types.Source
-local Graph = types.Graph
+local Query = types.Query
+local Collector = types.Collector
 
--- Define a search context
+-- A search context
 local Context = {}
-function Context:new(buf, win, pipeline, start_dir, query, data)
+function Context:new(buf, win, pipeline, start_dir, query)
   -- Set basic metadata fields
   local ctx = {
     buf = buf,
@@ -43,15 +44,14 @@ function Context:new(buf, win, pipeline, start_dir, query, data)
     pipeline = pipeline,
     search_dir = start_dir,
     query = query,
-    data = data,
     active = false,
-    results = {},
-    filter_views = {},
-    source_ctx = vim.loop.new_work(self.run_source, self.finish_source)
+    results = Collector:new(),
+    work_loop = vim.loop.new_work(self.run_source, self.finish_source)
   }
 
-  -- Link the "unfiltered" view to the main results table
-  ctx.filter_views[query] = { prev = nil, data = ctx.results }
+  -- Link the context, query graph, and results collector
+  ctx.pipeline.query.link_collector(ctx.results)
+  ctx.results.set_context(ctx)
 
   -- Setup methods
   setmetatable(ctx, self)
@@ -67,17 +67,15 @@ function Context:start()
   end
 
   -- Start each source function as new async work
-  for _, name in ipairs(self.pipeline) do
-    self.results[name] = { running = true, data = {} }
-    vim.loop.queue_work(self.source_ctx, name)
+  for _, source in ipairs(self.pipeline.query.sources) do
+    vim.loop.queue_work(self.work_loop, source)
   end
 
   self.active = true
 end
 
 function Context:run_source(source)
-  local source_fn = artemis.sources[source]
-  local results, err = source_fn(self.query, self.search_dir)
+  local results, err = source(self.query, self.search_dir)
   return source, results, err
 end
 
